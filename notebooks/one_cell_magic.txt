@@ -1,0 +1,197 @@
+# data cleaning and feature engineering
+
+import pandas as pd
+import numpy as np
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import OneHotEncoder
+
+data = pd.read_csv('../raw_data/inViales_completa.csv')
+
+# Drop duplicates
+data = data[data.drop(columns='folio').duplicated() == False]
+
+
+# FOR NOW DROP THE 'D' CLASS IN codigo_cierre
+data = data[(data['codigo_cierre'] == 'D') == False]
+
+# Drop unimportant columns
+data = data.drop(columns=['folio', 'fecha_cierre', 'hora_cierre', 'clas_con_f_alarma', 'alcaldia_cierre', 'colonia'])
+
+# fin_semana 
+fin_semana = (data['dia_semana'] == 'Sabado') | (data['dia_semana'] == 'Domingo')
+data['fin_semana'] = fin_semana
+data['fin_semana'] = data['fin_semana'].replace({True: 1, False : 0})
+
+
+# alcaldia_inicio imputer
+imputer = SimpleImputer(missing_values=np.nan, strategy='most_frequent') 
+imputer.fit(data[['alcaldia_inicio']])
+data[['alcaldia_inicio']] = imputer.transform(data[['alcaldia_inicio']])
+
+
+# colonia imputer
+imputer = SimpleImputer(strategy="most_frequent") 
+imputer.fit(data[['colonia']])
+data[['colonia']] = imputer.transform(data[['colonia']])
+
+
+# hora_creacion imputer
+imputer = SimpleImputer(strategy='most_frequent')
+imputer.fit(data[['hora_creacion']])
+data[['hora_creacion']] = imputer.transform(data[['hora_creacion']])
+
+
+# hora_pico
+data['hora_creacion'] = pd.to_timedelta(data['hora_creacion'])
+data['hora_creacion'] = data['hora_creacion'].dt.total_seconds() / (60 * 60)
+
+def hora_pico(row):
+    hour_calc = row['hora_creacion']
+    if hour_calc >= 7.5 and hour_calc <= 9.5:  # Verificar la hora entre 07:30 y 09:30
+        return 1
+    elif row['fecha_creacion'][:4] >= '2021' and (hour_calc >= 14 and hour_calc <= 15):  # A partir de marzo de 2020, verificar la hora entre 14:00 y 15:00
+        return 1
+    elif hour_calc >= 18 and hour_calc <= 19:  # Verificar la hora entre 18:00 y 19:00
+        return 1
+    else:
+        return 0
+
+data['hora_pico'] = data.apply(hora_pico, axis=1)
+
+
+# ids_clasificacion
+classification_dict = {
+    "AZCAPOTZALCO": 0.8786,
+    "COYOACAN": 0.8761,
+    "CUAJIMALPA DE MORELOS": 0.8422,
+    "GUSTAVO A. MADERO": 0.8401,
+    "IZTACALCO": 0.8494,
+    "IZTAPALAPA": 0.8030,
+    "LA MAGDALENA CONTRERAS": 0.8269,
+    "MILPA ALTA": 0.7582,
+    "ALVARO OBREGON": 0.8455,
+    "TLAHUAC": 0.8088,
+    "TLALPAN": 0.8309,
+    "XOCHIMILCO": 0.8026,
+    "BENITO JUAREZ": 0.9321,
+    "CUAUHTEMOC": 0.8483,
+    "MIGUEL HIDALGO": 0.8943,
+    "VENUSTIANO CARRANZA": 0.8355
+}
+data['ids_clasificacion'] = data['alcaldia_inicio'].map(classification_dict)
+
+
+# dias_festivos
+dias_festivos = ['01-01', '02-05', '03-21', '05-01', '08-16', '12-25']
+def festividades(d):
+    if d[5:] in dias_festivos:
+        return 1
+    return 0
+
+data['dia_festivo'] = data['fecha_creacion'].apply(festividades)
+
+
+# incidente_c4 class reduction
+incidente_c4_dict = {
+    'Choque sin lesionados': 'Choque sin lesionados', 
+    'Incidente de tránsito': 'Choque sin lesionados',
+    'Accidente automovilístico': 'Choque sin lesionados',
+    'Choque con lesionados': 'Choque con lesionados',
+    'Choque con prensados': 'Choque con lesionados',
+    'Atropellado': 'Atropellado',
+    'Persona atropellada': 'Atropellado',
+    'Motociclista': 'Motociclista',
+    'Volcadura': 'Volcadura',
+    'Ciclista': 'Ciclista',
+    'Monopatín': 'Ciclista',
+    'Persona atrapada / desbarrancada': 'Persona atrapada / desbarrancada',
+    'Vehículo atrapadovarado': 'Vehículo atrapadovarado',
+    'Vehiculo atrapado': 'Vehículo atrapadovarado',
+    'Vehiculo desbarrancado': 'Vehículo atrapadovarado',
+    'Otros': 'Otros',
+    'Ferroviario': 'Ferroviario'
+}
+data['incidente_c4'] = data['incidente_c4'].replace(incidente_c4_dict)
+
+
+# tipo_incidentes_c4 class reduction
+tipo_incidente_c4_dict = {
+    'Accidente': 'Accidente',
+    'Lesionado': 'Lesionado',
+    'Cadáver': 'Cadáver',
+    'Detención ciudadana': 'Accidente',
+    'Sismo': 'Accidente',
+    'Mi Calle': 'Accidente',
+    'Mi Taxi': 'Accidente'
+}
+data['tipo_incidente_c4'] = data['tipo_incidente_c4'].replace(tipo_incidente_c4_dict)
+
+
+# tipo_entrada class reduction
+tipo_entrada_dict = {
+    'LLAMADA DEL 911': 'LLAMADA DEL 911',
+    'LLAMADA APP911': 'LLAMADA DEL 911',
+    'LLAMADA DEL 066': 'LLAMADA DEL 911',
+    'RADIO': 'RADIO',
+    'BOTÓN DE AUXILIO': 'BOTÓN DE AUXILIO',
+    'REDES': 'REDES',
+    'ZELLO': 'RADIO',
+    'CÁMARA': 'CÁMARA',
+    'LECTOR DE PLACAS': 'CÁMARA',
+    'APLICATIVOS': 'RADIO',
+}
+data['tipo_entrada'] = data['tipo_entrada'].replace(tipo_entrada_dict)
+
+
+# tipo_entrada imputer
+data['tipo_entrada'].fillna('LLAMADA DEL 911', inplace=True)
+
+
+# OHE
+# dia_semana encoder
+ohe = OneHotEncoder(sparse_output= False, drop='if_binary')
+ohe.fit(data[['dia_semana']])
+data[ohe.get_feature_names_out()] = ohe.transform(data[['dia_semana']])
+data.drop(columns = ["dia_semana"], inplace=True)
+
+
+# tipo_entrada encoder
+ohe = OneHotEncoder(sparse_output= False, drop='if_binary')
+ohe.fit(data[['tipo_entrada']])
+data[ohe.get_feature_names_out()] = ohe.transform(data[['tipo_entrada']])
+data.drop(columns = ["tipo_entrada"], inplace=True)
+
+
+# alcaldia_inicio encoder
+ohe = OneHotEncoder(sparse_output= False, drop='if_binary')
+ohe.fit(data[['alcaldia_inicio']])
+data[ohe.get_feature_names_out()] = ohe.transform(data[['alcaldia_inicio']])
+data.drop(columns = ["alcaldia_inicio"], inplace=True)
+
+
+# tipo_incidente C4 encoder
+ohe = OneHotEncoder(sparse_output= False, drop='if_binary')
+ohe.fit(data[['tipo_incidente_c4']])
+data[ohe.get_feature_names_out()] = ohe.transform(data[['tipo_incidente_c4']])
+data.drop(columns = ['tipo_incidente_c4'], inplace=True)
+
+
+# incidente_C4 encoder
+ohe = OneHotEncoder(sparse_output= False, drop='if_binary')
+ohe.fit(data[['incidente_c4']])
+data[ohe.get_feature_names_out()] = ohe.transform(data[['incidente_c4']])
+data.drop(columns = ['incidente_c4'], inplace=True)
+
+
+# Create Binary class for 'A' vs 'I','N','F'
+codigo_cierre_binario = {
+    'A' : 1,
+    'I' : 0,
+    'N' : 0,
+    'F' : 0
+}
+data['codigo_cierre_binario'] = data['codigo_cierre'].replace(codigo_cierre_binario)
+
+
+# export to csv
+# data.to_csv('data911.csv', index=False)
